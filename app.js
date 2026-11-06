@@ -1,3 +1,8 @@
+
+// ==========================================
+// ARIM AI - VOICE ASSISTANT
+// ==========================================
+
 const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
 const status = document.getElementById('status');
@@ -8,33 +13,155 @@ const rings = document.querySelectorAll('.ring');
 
 let isActive = false;
 let isSpeaking = false;
-let controller = null;
 let isAwaitingResponse = false;
+let isRecognizing = false;
+
+let recognition = null;
+let controller = null;
+let processTimer = null;
+let restartTimer = null;
+
 let finalTranscript = '';
 let lastProcessedText = '';
 
+// Sounds
 const startSound = new Audio('startsound.mp3');
 const endSound = new Audio('endsound.mp3');
 const errorSound = new Audio('errorsound.mp3');
 
-let recognition = null;
-let processTimer = null;
-let restartTimer = null;
-let isRecognizing = false;
+// ==========================================
+// GROQ CONFIGURATION
+// ==========================================
 
-// Groq API Configuration
 const GROQ_API_KEY = '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';
-const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+
+const GROQ_API_URL =
+    'https://api.groq.com/openai/v1/chat/completions';
+
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
 
-// SPEECH RECOGNITION
+// ==========================================
+// GROQ AI RESPONSE
+// ==========================================
+
+async function getGroqResponse(userText) {
+
+    if (
+        !GROQ_API_KEY ||
+        GROQ_API_KEY === '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'
+    ) {
+        console.error('Groq API key is missing.');
+        return 'Please configure your Groq API key.';
+    }
+
+    const requestController = new AbortController();
+    controller = requestController;
+
+    const timeoutId = setTimeout(() => {
+        requestController.abort();
+    }, 20000);
+
+    try {
+
+        const response = await fetch(GROQ_API_URL, {
+
+            method: 'POST',
+
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${GROQ_API_KEY}`
+            },
+
+            signal: requestController.signal,
+
+            body: JSON.stringify({
+
+                model: GROQ_MODEL,
+
+                messages: [
+                    {
+                        role: 'system',
+                        content:
+                            'You are ARIM, a helpful AI voice assistant. Answer naturally, clearly and concisely. Use short responses suitable for voice output.'
+                    },
+                    {
+                        role: 'user',
+                        content: userText
+                    }
+                ],
+
+                temperature: 0.7,
+                max_tokens: 200,
+                stream: false
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+
+            console.error('Groq API Status:', response.status);
+            console.error('Groq API Details:', data);
+
+            if (response.status === 401) {
+                return 'Your Groq API key is invalid or expired.';
+            }
+
+            if (response.status === 403) {
+                return 'Groq API access is forbidden.';
+            }
+
+            if (response.status === 429) {
+                return 'Too many requests. Please try again later.';
+            }
+
+            return data.error?.message ||
+                'Sorry, I could not process your request.';
+        }
+
+        const answer = data.choices?.[0]?.message?.content;
+
+        if (!answer) {
+            return 'I could not generate a response.';
+        }
+
+        return answer.trim();
+
+    } catch (error) {
+
+        console.error('Groq Connection Error:', error);
+
+        if (error.name === 'AbortError') {
+            return 'Request timed out. Please try again.';
+        }
+
+        return 'Connection error. Please check your internet.';
+
+    } finally {
+
+        clearTimeout(timeoutId);
+
+        if (controller === requestController) {
+            controller = null;
+        }
+    }
+}
+
+// ==========================================
+// SPEECH RECOGNITION INITIALIZATION
+// ==========================================
 
 function initRecognition() {
+
     const SpeechRecognition =
-        window.SpeechRecognition || window.webkitSpeechRecognition;
+        window.SpeechRecognition ||
+        window.webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-        status.textContent = 'Speech recognition is not supported in this browser.';
+
+        status.textContent =
+            'Speech recognition is not supported in this browser.';
+
         startBtn.disabled = true;
         return;
     }
@@ -47,22 +174,80 @@ function initRecognition() {
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {
+
         isRecognizing = true;
+
         finalTranscript = '';
+
         status.textContent = 'Listening...';
     };
 
+    recognition.onresult = (event) => {
+
+        if (isSpeaking || isAwaitingResponse) return;
+
+        if (processTimer) {
+            clearTimeout(processTimer);
+        }
+
+        let currentTranscript = '';
+
+        for (
+            let i = event.resultIndex;
+            i < event.results.length;
+            i++
+        ) {
+
+            if (event.results[i].isFinal) {
+
+                currentTranscript +=
+                    event.results[i][0].transcript + ' ';
+            }
+        }
+
+        if (currentTranscript.trim()) {
+
+            finalTranscript += currentTranscript;
+
+            status.textContent =
+                `Heard: "${finalTranscript.trim()}"`;
+
+            processTimer = setTimeout(() => {
+
+                if (
+                    isActive &&
+                    !isSpeaking &&
+                    !isAwaitingResponse &&
+                    finalTranscript.trim()
+                ) {
+
+                    try {
+                        recognition.stop();
+                    } catch (error) {
+                        console.warn(error);
+                    }
+                }
+
+            }, 1000);
+        }
+    };
+
     recognition.onerror = (event) => {
+
         isRecognizing = false;
+
+        console.error('Speech Recognition Error:', event.error);
 
         if (event.error === 'no-speech') {
             return;
         }
 
         if (event.error === 'network') {
-            status.textContent = 'Please check your Internet connection.';
+
+            status.textContent = 'Speech network error.';
 
             isActive = false;
+
             isSpeaking = false;
             isAwaitingResponse = false;
 
@@ -76,10 +261,9 @@ function initRecognition() {
 
             core.classList.add('core-wifi');
             core.style.backgroundColor = 'rgb(255, 119, 0)';
-            core.style.boxShadow = '0 0 0';
-            core.style.top = '79%';
 
             speechSynthesis.cancel();
+
             errorSound.play().catch(() => {});
 
             startBtn.disabled = false;
@@ -87,6 +271,7 @@ function initRecognition() {
     };
 
     recognition.onend = () => {
+
         isRecognizing = false;
 
         if (processTimer) {
@@ -94,60 +279,31 @@ function initRecognition() {
             processTimer = null;
         }
 
+        const text = finalTranscript.trim();
+
         if (
             isActive &&
             !isSpeaking &&
             !isAwaitingResponse &&
-            finalTranscript.trim() &&
-            finalTranscript.trim() !== lastProcessedText
+            text &&
+            text !== lastProcessedText
         ) {
-            processUserInput(finalTranscript);
+
+            processUserInput(text);
+
         } else {
+
             restartRecognition();
-        }
-    };
-
-    recognition.onresult = (event) => {
-        if (isSpeaking || isAwaitingResponse) return;
-
-        if (processTimer) {
-            clearTimeout(processTimer);
-        }
-
-        let currentTranscript = '';
-
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-            if (event.results[i].isFinal) {
-                currentTranscript += event.results[i][0].transcript + ' ';
-            }
-        }
-
-        if (currentTranscript.trim()) {
-            finalTranscript += currentTranscript;
-
-            status.textContent = `Heard: "${finalTranscript.trim()}"`;
-
-            processTimer = setTimeout(() => {
-                if (
-                    finalTranscript.trim() &&
-                    isActive &&
-                    !isSpeaking &&
-                    !isAwaitingResponse
-                ) {
-                    try {
-                        recognition.stop();
-                    } catch (error) {
-                        console.warn('Recognition stop:', error.message);
-                    }
-                }
-            }, 800);
         }
     };
 }
 
+// ==========================================
 // RESTART RECOGNITION
+// ==========================================
 
 function restartRecognition() {
+
     if (
         !isActive ||
         isSpeaking ||
@@ -163,6 +319,7 @@ function restartRecognition() {
     }
 
     restartTimer = setTimeout(() => {
+
         restartTimer = null;
 
         if (
@@ -171,123 +328,46 @@ function restartRecognition() {
             !isAwaitingResponse &&
             !isRecognizing
         ) {
+
             try {
                 recognition.start();
             } catch (error) {
                 console.warn('Recognition restart:', error.message);
             }
         }
-    }, 400);
+
+    }, 500);
 }
 
-// GROQ API REQUEST
-
-async function getGroqResponse(userText) {
-    let timeoutId;
-
-    // Check API key
-    if (
-        !GROQ_API_KEY ||
-        GROQ_API_KEY === 'PASTE_YOUR_NEW_GROQ_API_KEY_HERE'
-    ) {
-        console.error('Groq API key is missing.');
-        return 'API key is not configured.';
-    }
-
-    const requestController = new AbortController();
-    controller = requestController;
-
-    try {
-        timeoutId = setTimeout(() => {
-            requestController.abort();
-        }, 15000);
-
-        const response = await fetch(GROQ_API_URL, {
-            method: 'POST',
-
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${GROQ_API_KEY}`
-            },
-
-            signal: requestController.signal,
-
-            body: JSON.stringify({
-                model: GROQ_MODEL,
-
-                messages: [
-                    {
-                        role: 'system',
-                        content: 'You are ARIM, a helpful AI voice assistant. Answer questions clearly and naturally. Keep responses very concise and short for voice output. Avoid unnecessary explanations.'
-                    },
-                    {
-                        role: 'user',
-                        content: userText
-                    }
-                ],
-
-                temperature: 0.7,
-                max_tokens: 150
-            })
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            console.error('Groq API Error:', response.status, data);
-
-            if (response.status === 401) {
-                return 'Invalid API key. Please check your Groq API key.';
-            }
-
-            if (response.status === 429) {
-                return 'Too many requests. Please try again shortly.';
-            }
-
-            return 'Sorry, I could not process your request.';
-        }
-
-        if (
-            data.choices &&
-            data.choices.length > 0 &&
-            data.choices[0].message
-        ) {
-            return data.choices[0].message.content.trim();
-        }
-
-        return 'I could not process that.';
-
-    } catch (error) {
-        console.error('Groq Connection Error:', error);
-
-        if (error.name === 'AbortError') {
-            return 'Request timed out. Please try again.';
-        }
-
-        return 'Connection error. Please check your internet.';
-
-    } finally {
-        clearTimeout(timeoutId);
-
-        if (controller === requestController) {
-            controller = null;
-        }
-    }
-}
-
+// ==========================================
 // PROCESS USER INPUT
+// ==========================================
 
 async function processUserInput(userText) {
-    if (isAwaitingResponse || isSpeaking || !isActive) return;
+
+    if (
+        !isActive ||
+        isSpeaking ||
+        isAwaitingResponse
+    ) {
+        return;
+    }
 
     const cleanedText = userText.trim();
 
-    if (!cleanedText || cleanedText === lastProcessedText) return;
+    if (
+        !cleanedText ||
+        cleanedText === lastProcessedText
+    ) {
+        return;
+    }
 
     isAwaitingResponse = true;
+
     lastProcessedText = cleanedText;
 
-    status.textContent = `Processing: "${cleanedText}"`;
+    status.textContent =
+        `Processing: "${cleanedText}"`;
 
     const startTime = Date.now();
 
@@ -295,21 +375,31 @@ async function processUserInput(userText) {
 
     const elapsedTime = Date.now() - startTime;
 
-    if (!answer || !isActive) {
+    if (!isActive) {
         isAwaitingResponse = false;
-        finalTranscript = '';
-        restartRecognition();
         return;
     }
 
-    status.textContent = `Response ready (${elapsedTime}ms)`;
+    if (!answer) {
 
-    // Display response
+        isAwaitingResponse = false;
+
+        finalTranscript = '';
+
+        restartRecognition();
+
+        return;
+    }
+
+    status.textContent =
+        `Response ready (${elapsedTime}ms)`;
+
     output.textContent = answer;
 
     isSpeaking = true;
 
-    const utterance = new SpeechSynthesisUtterance(answer);
+    const utterance =
+        new SpeechSynthesisUtterance(answer);
 
     utterance.lang = 'en-US';
     utterance.rate = 1.0;
@@ -320,16 +410,20 @@ async function processUserInput(userText) {
     };
 
     utterance.onend = () => {
+
         isSpeaking = false;
         isAwaitingResponse = false;
+
         finalTranscript = '';
 
         restartRecognition();
     };
 
     utterance.onerror = () => {
+
         isSpeaking = false;
         isAwaitingResponse = false;
+
         finalTranscript = '';
 
         restartRecognition();
@@ -338,9 +432,12 @@ async function processUserInput(userText) {
     speechSynthesis.speak(utterance);
 }
 
+// ==========================================
 // START ASSISTANT
+// ==========================================
 
 startBtn.addEventListener('click', () => {
+
     if (isActive) return;
 
     if (restartTimer) {
@@ -354,6 +451,7 @@ startBtn.addEventListener('click', () => {
     }
 
     isActive = true;
+
     isSpeaking = false;
     isAwaitingResponse = false;
 
@@ -364,6 +462,7 @@ startBtn.addEventListener('click', () => {
 
     rings.forEach(r => {
         r.classList.remove('pulse2');
+        r.classList.add('pulse');
     });
 
     if (!recognition) {
@@ -377,49 +476,55 @@ startBtn.addEventListener('click', () => {
 
     startSound.play().catch(() => {});
 
-    rings.forEach(r => {
-        r.classList.add('pulse');
-    });
-
     core.style.top = '40.2%';
-    core.style.boxShadow = '0 0 2rem #8fefff, inset 0 0 1.5625rem #8fefff';
+
+    core.style.boxShadow =
+        '0 0 2rem #8fefff, inset 0 0 1.5625rem #8fefff';
+
     core.style.backgroundColor = '#8fefff';
 
     aiActive.style.color = '#8fefff';
+
     aiActive.textContent = 'ARIM Assistant Active';
 
     status.textContent = 'Starting...';
+
     startBtn.disabled = true;
 
     setTimeout(() => {
+
         if (!isActive) return;
 
-        const testing = new SpeechSynthesisUtterance(
+        const greeting = new SpeechSynthesisUtterance(
             'Greetings, I am your Arim AI assistant. How can I assist you today?'
         );
 
-        testing.lang = 'en-US';
-        testing.rate = 1.0;
+        greeting.lang = 'en-US';
+        greeting.rate = 1.0;
 
-        testing.onend = () => {
+        greeting.onend = () => {
             restartRecognition();
         };
 
-        testing.onerror = () => {
+        greeting.onerror = () => {
             restartRecognition();
         };
 
-        speechSynthesis.speak(testing);
+        speechSynthesis.speak(greeting);
 
     }, 500);
 });
 
+// ==========================================
 // STOP ASSISTANT
+// ==========================================
 
 stopBtn.addEventListener('click', () => {
+
     if (!isActive) return;
 
     isActive = false;
+
     isSpeaking = false;
     isAwaitingResponse = false;
 
@@ -446,10 +551,11 @@ stopBtn.addEventListener('click', () => {
     }
 
     if (recognition) {
+
         try {
             recognition.stop();
         } catch (error) {
-            console.warn('Recognition stop:', error.message);
+            console.warn(error);
         }
     }
 
@@ -475,6 +581,9 @@ stopBtn.addEventListener('click', () => {
     aiActive.style.color = '';
 });
 
+// ==========================================
 // INITIALIZE
+// ==========================================
 
 initRecognition();
+```
