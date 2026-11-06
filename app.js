@@ -23,7 +23,7 @@ let restartTimer = null;
 let isRecognizing = false;
 
 // Groq API Configuration
-const GROQ_API_KEY = 'PASTE_YOUR_NEW_GROQ_API_KEY_HERE';
+const GROQ_API_KEY = 'grok_d575af788f9c879fe096d9b5ddb04587_c3560bd1a8c44aff384bf0621ef9f43eae68c08ae624bbf97c10582cc3ea0aae';
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
 
@@ -188,7 +188,7 @@ async function getGroqResponse(userText) {
     // Check API key
     if (
         !GROQ_API_KEY ||
-        GROQ_API_KEY === 'grok_d575af788f9c879fe096d9b5ddb04587_c3560bd1a8c44aff384bf0621ef9f43eae68c08ae624bbf97c10582cc3ea0aae'
+        GROQ_API_KEY === 'PASTE_YOUR_NEW_GROQ_API_KEY_HERE'
     ) {
         console.error('Groq API key is missing.');
         return 'API key is not configured.';
