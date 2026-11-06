@@ -105,7 +105,7 @@ function initRecognition() {
     };
 }
 
-const GROQ_API_KEY = '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';
+const GROQ_API_KEY = 'grok_5fe3f99754d36068321f05bcd81bb7a3_6fec5badcb97138298480c61e7d1870522c2e6bf3c16c6019450ae788b6fede4';
 
 async function getGroqResponse(userText) {
     try {
