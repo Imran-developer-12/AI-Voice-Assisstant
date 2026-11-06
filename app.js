@@ -1,10 +1,9 @@
-
 const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
 const status = document.getElementById('status');
-let output = document.getElementById('output');
-let aiActive = document.getElementById('aiactive');
-let core = document.querySelector('.core');
+const output = document.getElementById('output');
+const aiActive = document.getElementById('aiactive');
+const core = document.querySelector('.core');
 const rings = document.querySelectorAll('.ring');
 
 let isActive = false;
@@ -18,14 +17,17 @@ const startSound = new Audio('startsound.mp3');
 const endSound = new Audio('endsound.mp3');
 const errorSound = new Audio('errorsound.mp3');
 
-let recognition;
-let processTimer;
+let recognition = null;
+let processTimer = null;
+let restartTimer = null;
 let isRecognizing = false;
 
 // Groq API Configuration
 const GROQ_API_KEY = 'PASTE_YOUR_NEW_GROQ_API_KEY_HERE';
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
+
+// SPEECH RECOGNITION
 
 function initRecognition() {
     const SpeechRecognition =
@@ -59,6 +61,7 @@ function initRecognition() {
 
         if (event.error === 'network') {
             status.textContent = 'Please check your Internet connection.';
+
             isActive = false;
             isSpeaking = false;
             isAwaitingResponse = false;
@@ -66,8 +69,10 @@ function initRecognition() {
             aiActive.textContent = 'Network Connection Lost!';
             aiActive.style.color = 'rgb(235, 154, 83)';
 
-            rings.forEach(r => r.classList.remove('pulse'));
-            rings.forEach(r => r.classList.add('pulse2'));
+            rings.forEach(r => {
+                r.classList.remove('pulse');
+                r.classList.add('pulse2');
+            });
 
             core.classList.add('core-wifi');
             core.style.backgroundColor = 'rgb(255, 119, 0)';
@@ -76,6 +81,7 @@ function initRecognition() {
 
             speechSynthesis.cancel();
             errorSound.play().catch(() => {});
+
             startBtn.disabled = false;
         }
     };
@@ -104,7 +110,9 @@ function initRecognition() {
     recognition.onresult = (event) => {
         if (isSpeaking || isAwaitingResponse) return;
 
-        if (processTimer) clearTimeout(processTimer);
+        if (processTimer) {
+            clearTimeout(processTimer);
+        }
 
         let currentTranscript = '';
 
@@ -126,12 +134,18 @@ function initRecognition() {
                     !isSpeaking &&
                     !isAwaitingResponse
                 ) {
-                    recognition.stop();
+                    try {
+                        recognition.stop();
+                    } catch (error) {
+                        console.warn('Recognition stop:', error.message);
+                    }
                 }
             }, 800);
         }
     };
 }
+
+// RESTART RECOGNITION
 
 function restartRecognition() {
     if (
@@ -140,9 +154,17 @@ function restartRecognition() {
         isAwaitingResponse ||
         isRecognizing ||
         !recognition
-    ) return;
+    ) {
+        return;
+    }
 
-    setTimeout(() => {
+    if (restartTimer) {
+        clearTimeout(restartTimer);
+    }
+
+    restartTimer = setTimeout(() => {
+        restartTimer = null;
+
         if (
             isActive &&
             !isSpeaking &&
@@ -158,19 +180,26 @@ function restartRecognition() {
     }, 400);
 }
 
+// GROQ API REQUEST
+
 async function getGroqResponse(userText) {
     let timeoutId;
 
+    // Check API key
+    if (
+        !GROQ_API_KEY ||
+        GROQ_API_KEY === 'grok_d575af788f9c879fe096d9b5ddb04587_c3560bd1a8c44aff384bf0621ef9f43eae68c08ae624bbf97c10582cc3ea0aae'
+    ) {
+        console.error('Groq API key is missing.');
+        return 'API key is not configured.';
+    }
+
+    const requestController = new AbortController();
+    controller = requestController;
+
     try {
-        if (!GROQ_API_KEY || GROQ_API_KEY === 'grok_d575af788f9c879fe096d9b5ddb04587_c3560bd1a8c44aff384bf0621ef9f43eae68c08ae624bbf97c10582cc3ea0aae') {
-            console.error('Groq API key is missing.');
-            return 'API key is not configured.';
-        }
-
-        controller = new AbortController();
-
         timeoutId = setTimeout(() => {
-            if (controller) controller.abort();
+            requestController.abort();
         }, 15000);
 
         const response = await fetch(GROQ_API_URL, {
@@ -181,7 +210,7 @@ async function getGroqResponse(userText) {
                 'Authorization': `Bearer ${GROQ_API_KEY}`
             },
 
-            signal: controller.signal,
+            signal: requestController.signal,
 
             body: JSON.stringify({
                 model: GROQ_MODEL,
@@ -239,9 +268,14 @@ async function getGroqResponse(userText) {
 
     } finally {
         clearTimeout(timeoutId);
-        controller = null;
+
+        if (controller === requestController) {
+            controller = null;
+        }
     }
 }
+
+// PROCESS USER INPUT
 
 async function processUserInput(userText) {
     if (isAwaitingResponse || isSpeaking || !isActive) return;
@@ -270,7 +304,7 @@ async function processUserInput(userText) {
 
     status.textContent = `Response ready (${elapsedTime}ms)`;
 
-    // Display plain text safely
+    // Display response
     output.textContent = answer;
 
     isSpeaking = true;
@@ -309,11 +343,15 @@ async function processUserInput(userText) {
 startBtn.addEventListener('click', () => {
     if (isActive) return;
 
-    if (recognition && isSpeaking) {
-        speechSynthesis.cancel();
+    if (restartTimer) {
+        clearTimeout(restartTimer);
+        restartTimer = null;
     }
 
-    if (processTimer) clearTimeout(processTimer);
+    if (processTimer) {
+        clearTimeout(processTimer);
+        processTimer = null;
+    }
 
     isActive = true;
     isSpeaking = false;
@@ -324,17 +362,24 @@ startBtn.addEventListener('click', () => {
 
     core.classList.remove('core-wifi');
 
-    rings.forEach(r => r.classList.remove('pulse2'));
+    rings.forEach(r => {
+        r.classList.remove('pulse2');
+    });
 
     if (!recognition) {
         initRecognition();
     }
 
-    if (!recognition) return;
+    if (!recognition) {
+        isActive = false;
+        return;
+    }
 
     startSound.play().catch(() => {});
 
-    rings.forEach(r => r.classList.add('pulse'));
+    rings.forEach(r => {
+        r.classList.add('pulse');
+    });
 
     core.style.top = '40.2%';
     core.style.boxShadow = '0 0 2rem #8fefff, inset 0 0 1.5625rem #8fefff';
@@ -395,10 +440,17 @@ stopBtn.addEventListener('click', () => {
         processTimer = null;
     }
 
+    if (restartTimer) {
+        clearTimeout(restartTimer);
+        restartTimer = null;
+    }
+
     if (recognition) {
         try {
             recognition.stop();
-        } catch (error) {}
+        } catch (error) {
+            console.warn('Recognition stop:', error.message);
+        }
     }
 
     speechSynthesis.cancel();
@@ -409,8 +461,10 @@ stopBtn.addEventListener('click', () => {
 
     startBtn.disabled = false;
 
-    rings.forEach(r => r.classList.remove('pulse'));
-    rings.forEach(r => r.classList.remove('pulse2'));
+    rings.forEach(r => {
+        r.classList.remove('pulse');
+        r.classList.remove('pulse2');
+    });
 
     core.classList.remove('core-wifi');
 
@@ -422,5 +476,5 @@ stopBtn.addEventListener('click', () => {
 });
 
 // INITIALIZE
-initRecognition();
 
+initRecognition();
