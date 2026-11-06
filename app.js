@@ -23,7 +23,7 @@ let restartTimer = null;
 let isRecognizing = false;
 
 // Groq API Configuration
-const GROQ_API_KEY = 'grok_d575af788f9c879fe096d9b5ddb04587_c3560bd1a8c44aff384bf0621ef9f43eae68c08ae624bbf97c10582cc3ea0aae';
+const GROQ_API_KEY = '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';
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
 
