@@ -40,7 +40,7 @@ const endSound = new Audio('endsound.mp3');
 const errorSound = new Audio('errorsound.mp3');
 
 async function getGroqResponse(userText) {
-  if (!GROQ_API_KEY || GROQ_API_KEY === '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') {
+  if (!GROQ_API_KEY || GROQ_API_KEY === 'PASTE_YOUR_NEW_GROQ_API_KEY_HERE') {
     return 'Add your Groq API key in the GROQ_API_KEY line in this file.';
   }
 
